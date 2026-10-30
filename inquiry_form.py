@@ -1,16 +1,16 @@
-import os
 from datetime import date
 
 import streamlit as st
 from dotenv import load_dotenv
+from keys import get_key
 from supabase import create_client
 
 st.set_page_config(page_title="문의 남기기")
 
 # 손님용 화면 — 공개용 키(SUPABASE_KEY)만 쓴다. 관리자 키를 여기에 쓰지 말 것
 load_dotenv()
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
+url = get_key("SUPABASE_URL")
+key = get_key("SUPABASE_KEY")
 if not url or not key:
     st.error(".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣어 주세요.")
     st.stop()

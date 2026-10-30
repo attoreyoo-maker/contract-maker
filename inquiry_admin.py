@@ -1,15 +1,14 @@
-import os
-
 import streamlit as st
 from dotenv import load_dotenv
+from keys import get_key
 from supabase import create_client
 
 st.set_page_config(page_title="문의 답변")
 
 # 내 답변 화면 — 관리자 키(SUPABASE_SERVICE_KEY)를 쓴다. 내 컴퓨터에서만 실행할 것
 load_dotenv()
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_SERVICE_KEY")
+url = get_key("SUPABASE_URL")
+key = get_key("SUPABASE_SERVICE_KEY")
 if not url or not key:
     st.error(".env 에 SUPABASE_URL 과 SUPABASE_SERVICE_KEY 를 넣어 주세요.")
     st.stop()

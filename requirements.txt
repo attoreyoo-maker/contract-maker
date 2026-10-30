@@ -1,9 +1,16 @@
+# 모든 화면 파일의 바탕 — 화면 틀, 입력칸, 버튼, 표를 그린다
 streamlit
+# app.py 에서 견본 계약서·양식 CSV 를 읽고, lunch.py·subs.py 에서 가게·구독 목록을 표로 만든다
 pandas
+# practice_table.py 를 뺀 화면 파일에서 .env 에 적은 키(SUPABASE_URL, ANTHROPIC_API_KEY 등)를 불러온다
 python-dotenv
+# 계약서 목록·채팅 기록·방명록·문의·구독을 Supabase 표에 저장하고, 문서·사진 보관함에 파일을 올린다
 supabase
-google-genai
+# app.py 에서 계약서를 A4 그림으로 그려 PDF 로 저장하고, 챗봇 로봇 얼굴 그림을 잘라 줄인다
 Pillow
+# app.py 의 챗봇과 helper.py 의 챗봇 화면이 Claude 에 말을 보내고 답을 받는다
 anthropic
+# lunch.py 맛집 대시보드에서 종류별·거리별 가게 수를 막대그래프로 그린다
 altair
+# lunch.py 에서 카카오 지도 키워드 검색에 가게를 물어본다
 requests

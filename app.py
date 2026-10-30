@@ -2,7 +2,6 @@ import base64
 import html
 import io
 import json
-import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,17 +9,17 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from keys import get_key
+import anthropic
 from PIL import Image, ImageDraw, ImageFont
 from supabase import create_client
 
 # 화면 가로 폭을 끝까지 쓴다
 st.set_page_config(page_title="계약서 만들기", page_icon="💬", layout="wide")
 
-# 챗봇 — helper.py 와 같은 방식으로 Gemini 를 부른다
-MODEL = "gemini-3.5-flash-lite"
-TIMEOUT_MS = 60000  # 60초 안에 답이 없으면 멈추고 오류를 보여 준다
+# 챗봇 — helper.py 와 같은 방식으로 Claude 를 부른다
+MODEL = "claude-opus-5-5"
+TIMEOUT = 60  # 60초 안에 답이 없으면 멈추고 오류를 보여 준다
 
 # 챗봇 말투 — 대화창에서 고른 말투의 설명을 고정 지시문 뒤에 붙여 보낸다
 TONES = {
@@ -52,9 +51,8 @@ def load(name):
     return pd.read_csv(DATA / name, dtype=str).fillna("(빈칸)")
 
 
-contracts = load("contracts.csv")
+samples = load("sample_contracts.csv")  # 화면 1 예시 계약서 — 양식마다 1개씩
 templates = load("templates.csv")
-partners = load("partners.csv")
 
 
 # PDF 에 쓰는 한글 글꼴 — 윈도우에 들어 있는 맑은 고딕
@@ -96,6 +94,18 @@ def contract_pdf(partner, amount, date, content):
     return out.getvalue()
 
 
+def contract_text(partner, amount, date, content):
+    """화면에 펼쳐 보이는 계약서 모양 — 화면 3 결과와 화면 2 미리보기가 함께 쓴다"""
+    body = "\n".join("  " + line for line in content.split("\n"))
+    return f"""                계약서
+
+  거래처명 (을)  : {partner}
+  계약 금액      : {amount}
+  계약 날짜      : {date}
+  계약 내용      :
+{body}"""
+
+
 def file_name(partner, date):
     """계약서_거래처명_날짜 — 파일 이름으로 쓸 수 없는 글자는 _ 로 바꾼다"""
     return re.sub(r'[\\/:*?"<>|]', "_", f"계약서_{partner}_{date}") + ".pdf"
@@ -114,14 +124,18 @@ def blank(value):
 def start_new():
     """"+ 계약서 새로 만들기" — 빈 입력칸으로 시작해 화면 2로 간다"""
     st.session_state.fill = {}
+    st.session_state.chosen_form = ""
     st.session_state.made, st.session_state.missing = None, []
     go(SCREEN_2)
 
 
 def pick_contract(row):
-    """목록 항목을 고르면 — 그 계약서 내용을 담아 두고 화면 2로 간다"""
-    st.session_state.fill = {"in_partner": blank(row.partner), "in_amount": blank(row.amount),
-                             "in_date": blank(row.date), "in_content": blank(row.content)}
+    """목록 항목을 고르면 — 그 계약서 내용(내가 만든 것이면 양식 이름도)을 담아 두고 화면 2로 간다"""
+    st.session_state.fill = {"in_partner": blank(row["partner"]), "in_amount": blank(row["amount"]),
+                             "in_date": blank(row["date"]), "in_content": blank(row["content"])}
+    st.session_state.chosen_form = row.get("form", "")
+    # 그 계약서의 양식을 화면 2 양식 목록에서 미리 골라 두어, 가자마자 미리보기가 보이게 한다
+    st.session_state.form = st.session_state.chosen_form if st.session_state.chosen_form in templates["name"].tolist() else None
     st.session_state.made, st.session_state.missing = None, []
     go(SCREEN_2)
 
@@ -132,6 +146,7 @@ def next_step():
     if form:
         body = templates.loc[templates["name"] == form, "body"].iloc[0]
         st.session_state.setdefault("fill", {})["in_content"] = blank(body)
+        st.session_state.chosen_form = form  # 만든 계약서를 목록에서 양식별로 묶을 때 쓴다
     go(SCREEN_2, 2)
 
 
@@ -152,6 +167,48 @@ def make():
     missing = [word for key, word in FIELDS.items() if not st.session_state.get(key, "").strip()]
     st.session_state.missing = missing
     st.session_state.made = None if missing else tuple(st.session_state[key].strip() for key in FIELDS)
+    if not missing:
+        st.session_state.auto_download = True  # 만들기와 함께 PDF 도 바로 내려받는다
+        save_contract(st.session_state.made)
+
+
+# 화면 1 에서 내가 만든 계약서를 묶는 양식 — 이 셋이 아닌 양식으로 만든 것은 맨 아래 "그 밖의 계약서"에 둔다
+FORMS = ["기본 계약서 양식", "용역 계약서 양식", "납품 계약서 양식"]
+OTHER = "그 밖의 계약서"
+
+
+def save_contract(made):
+    """만든 계약서를 Supabase contracts 표에 한 줄로 남긴다 — 어디서 열어도 화면 1 목록에 보인다"""
+    partner, amount, date, content = made
+    supabase = chat_table()
+    if supabase is None:
+        st.session_state.save_note = ("error", ".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣어야 계약서 목록에 쌓입니다.")
+        return
+    try:
+        supabase.table("contracts").insert(
+            {"form": st.session_state.get("chosen_form", ""), "partner": partner,
+             "amount": amount, "date": date, "content": content},
+            returning="minimal",
+        ).execute()
+        st.session_state.save_note = ("success", "계약서 목록에 담았습니다")
+    except Exception as e:
+        st.session_state.save_note = ("error", f"계약서를 Supabase 에 남기지 못했습니다: {e}")
+
+
+def my_contracts():
+    """Supabase contracts 표에서 내가 만든 계약서를 모두 읽는다 — (목록, 안내 말)"""
+    supabase = chat_table()
+    if supabase is None:
+        return [], ".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣으면 내가 만든 계약서가 여기에 보입니다."
+    try:
+        return supabase.table("contracts").select("form, partner, amount, date, content").execute().data, None
+    except Exception as e:
+        return [], f"내가 만든 계약서를 불러오지 못했습니다: {e}"
+
+
+def by_name(partner):
+    """업체명 가나다 순 — 앞에 붙은 (주)는 빼고 견준다"""
+    return re.sub(r"^\(주\)\s*", "", partner)
 
 
 @st.cache_data
@@ -195,8 +252,7 @@ def chatbot():
                       border-radius: 6px; background: white; cursor: pointer; white-space: nowrap; }}
     </style>""")
     if "chat" not in st.session_state:
-        st.session_state.chat = []          # 지금까지 주고받은 말
-        st.session_state.chat_last_id = None  # 이어서 대화하려고 Gemini 가 준 앞 대화 번호
+        st.session_state.chat = []          # 지금까지 주고받은 말 — 매번 통째로 Claude 에 보내 앞에서 한 말을 기억하게 한다
 
     with st.container(key="chatbot"):
         with st.popover("챗봇"):
@@ -225,35 +281,40 @@ def chatbot():
 
 
 def ask(question, tone, history):
-    """물은 말을 Gemini 에 보내고 받은 답을 대화창에 보여 준 뒤 돌려준다"""
+    """물은 말을 Claude 에 보내고 받은 답을 대화창에 보여 준 뒤 돌려준다"""
     history.chat_message("user").write(question)
     st.session_state.chat.append(("user", question))
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    api_key = get_key("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
-        answer = "GEMINI_API_KEY 가 비어 있습니다. .env 에 넣어 주세요."
+        answer = "ANTHROPIC_API_KEY 가 비어 있습니다. .env 에 넣어 주세요."
     else:
         # 고정 지시문은 chatbot_prompt.txt 에 있다 — 지시문을 바꿀 때는 그 파일만 고친다
         instruction = (Path(__file__).parent / "chatbot_prompt.txt").read_text(encoding="utf-8").strip()
         prd = (Path(__file__).parent / "PRD.md").read_text(encoding="utf-8")
-        # 두 번째 질문부터는 앞 대화 번호를 함께 보내 앞에서 한 말을 기억하게 한다
-        earlier = {}
-        if st.session_state.chat_last_id:
-            earlier["previous_interaction_id"] = st.session_state.chat_last_id
         try:
             with history, st.spinner("답을 쓰는 중..."):
-                client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
-                interaction = client.interactions.create(
+                client = anthropic.Anthropic(api_key=api_key, timeout=TIMEOUT)
+                response = client.beta.messages.create(
                     model=MODEL,
-                    input=question,
-                    system_instruction=instruction + "\n\n[말투]\n" + TONES[tone] + "\n\n" + prd,
-                    **earlier,
+                    max_tokens=16000,
+                    output_config={"effort": "low"},  # 간단한 대화라 생각을 짧게 해서 빠르고 싸게 답한다
+                    # Claude 가 답을 거절하면 다른 Claude 모델이 이어서 답하게 한다
+                    betas=["server-side-fallback-2026-07-01"],
+                    fallbacks="default",
+                    system=instruction + "\n\n[말투]\n" + TONES[tone] + "\n\n" + prd,
+                    # 지금까지 주고받은 말을 모두 보내 앞에서 한 말을 기억하게 한다
+                    messages=[{"role": role, "content": text} for role, text in st.session_state.chat],
                 )
-            st.session_state.chat_last_id = interaction.id
-            # Gemini 가 가끔 글자 없이 빈 답을 보낼 때가 있다
-            answer = interaction.output_text or "답을 받지 못했습니다.\n같은 말을 한 번 더 보내 주세요.\n그래도 안 되면 질문을 조금 바꿔 보세요."
-        except Exception as e:
-            answer = f"Gemini 를 부르지 못했습니다: {e}"
+            if response.stop_reason == "refusal":
+                answer = "이 질문에는 답할 수 없습니다.\n질문을 조금 바꿔 보세요."
+            else:
+                # 가끔 글자 없이 빈 답이 올 때가 있다
+                answer = "".join(b.text for b in response.content if b.type == "text") or "답을 받지 못했습니다.\n같은 말을 한 번 더 보내 주세요.\n그래도 안 되면 질문을 조금 바꿔 보세요."
+        except anthropic.AuthenticationError:
+            answer = "ANTHROPIC_API_KEY 가 올바르지 않습니다. .env 의 키를 확인해 주세요."
+        except anthropic.APIError as e:
+            answer = f"Claude 를 부르지 못했습니다: {e}"
     show_answer(history, answer)
     st.session_state.chat.append(("assistant", answer))
     return answer
@@ -266,8 +327,8 @@ def connect(url, key):
 
 def chat_table():
     """Supabase chat_logs 표 — 공개용 키(SUPABASE_KEY)를 쓴다. 관리자 키를 여기에 쓰지 말 것"""
-    url = os.getenv("SUPABASE_URL", "").strip()
-    key = os.getenv("SUPABASE_KEY", "").strip()
+    url = get_key("SUPABASE_URL", "").strip()
+    key = get_key("SUPABASE_KEY", "").strip()
     if not url or not key:
         return None
     return connect(url, key)
@@ -419,15 +480,7 @@ if st.session_state.screen == SCREEN_3:
     made = st.session_state.get("made")
     if made:
         partner, amount, date, content = made
-        center.code(
-            f"""                계약서
-
-  거래처명 (을)  : {partner}
-  계약 금액      : {amount}
-  계약 날짜      : {date}
-  계약 내용      : {content}""",
-            language=None,
-        )
+        center.code(contract_text(partner, amount, date, content), language=None)
     else:
         center.caption("왼쪽 칸을 모두 채우고 \"만들기\"를 누르면 여기에 계약서가 펼쳐집니다.")
 
@@ -439,14 +492,30 @@ if st.session_state.screen == SCREEN_3:
     for word in st.session_state.get("missing", []):
         make_col.error(f"{word} 넣지 않았습니다")
 
+    # 계약서 목록(Supabase)에 담았는지 알려 준다
+    if made and st.session_state.get("save_note"):
+        kind, note = st.session_state.save_note
+        getattr(make_col, kind)(note)
+
     # 다운로드 — 계약서_거래처명_날짜.pdf 로 내려받는다 (수용 기준 4)
     # 버튼은 늘 보이게 두고, "만들기" 전에는 눌리지 않게 막아 둔다
     if not made:
         down_col.download_button("다운로드", b"", disabled=True, width="stretch")
-    elif down_col.download_button("다운로드", contract_pdf(partner, amount, date, content),
-                                  file_name=file_name(partner, date), mime="application/pdf",
-                                  width="stretch"):
-        down_col.success("다운로드 완료")
+    else:
+        pdf = contract_pdf(partner, amount, date, content)
+        if down_col.download_button("다운로드", pdf, file_name=file_name(partner, date),
+                                    mime="application/pdf", width="stretch"):
+            down_col.success("다운로드 완료")
+
+        # "만들기"를 누른 바로 그때 한 번만 PDF 를 저절로 내려받는다
+        if st.session_state.pop("auto_download", False):
+            st.html(
+                f"""<a id="auto-pdf" download="{html.escape(file_name(partner, date))}"
+                       href="data:application/pdf;base64,{base64.b64encode(pdf).decode()}"></a>
+                <script>document.getElementById("auto-pdf").click();</script>""",
+                unsafe_allow_javascript=True,
+            )
+            down_col.success("다운로드 완료")
 
 elif st.session_state.screen == SCREEN_1:
     st.warning("아직 예시 결과입니다")
@@ -454,11 +523,38 @@ elif st.session_state.screen == SCREEN_1:
 
     st.button("+ 계약서 새로 만들기", width="stretch", on_click=start_new)
 
-    # 목록 (data/contracts.csv) — 3열로 나란히 놓아 아래로 길어지지 않게 한다. 항목을 선택하면 화면 2로 간다
-    cols = st.columns(3)
-    for i, row in contracts.iterrows():
-        cols[i % 3].button(f"{row.partner}  ·  {row.amount}  ·  {row.date}", width="stretch",
-                           key=f"contract_{i}", on_click=pick_contract, args=(row,))
+    # 목록 항목은 3열로 나란히 놓아 아래로 길어지지 않게 한다. 항목을 선택하면 화면 2로 간다
+    def contract_buttons(rows, prefix):
+        cols = st.columns(3)
+        for i, row in enumerate(rows):
+            cols[i % 3].button(f"{row['partner']}  ·  {row['amount']}  ·  {row['date']}", width="stretch",
+                               key=f"{prefix}_{i}", on_click=pick_contract, args=(row,))
+
+    # 내가 만든 계약서 (Supabase contracts 표) — 양식별로 묶고, 그 안에서 업체명 가나다 순
+    st.subheader("내가 만든 계약서")
+    mine, note = my_contracts()
+    if note:
+        st.caption(note)
+    for form in FORMS + [OTHER]:
+        rows = sorted((r for r in mine if (r["form"] if r["form"] in FORMS else OTHER) == form),
+                      key=lambda r: by_name(r["partner"]))
+        if form == OTHER and not rows:
+            continue  # 세 양식 밖의 계약서가 없으면 이 묶음은 감춘다
+        st.markdown(f"**{form}** ({len(rows)}개)")
+        if rows:
+            contract_buttons(rows, f"mine_{FORMS.index(form) if form in FORMS else 'other'}")
+        else:
+            st.caption('아직 없습니다. 화면 3에서 "만들기"를 누르면 여기에 쌓입니다.')
+
+    # 예시 계약서 (data/sample_contracts.csv, 양식마다 1개) — 진짜 계약서와 헷갈리지 않게 상자에 담고 「예시」라고 적는다
+    with st.container(border=True):
+        st.markdown("**예시 계약서 (샘플)**")
+        st.caption("실제 계약서가 아닌 보기용 예시입니다. 눌러서 어떻게 쓰는지 살펴볼 수 있습니다.")
+        cols = st.columns(3)
+        for i, row in samples.iterrows():
+            cols[i % 3].markdown(f"**{row.form}**")  # 「예시 계약서 (샘플)」 제목과 같은 크기·굵기
+            cols[i % 3].button(f"{row.partner}  ·  {row.amount}  ·  {row.date}", width="stretch",
+                               key=f"contract_{i}", on_click=pick_contract, args=(row.to_dict(),))
 
 else:
     st.warning("아직 예시 결과입니다")
@@ -469,12 +565,30 @@ else:
                + "  ─────  "
                + ("**② 거래처 고르기**" if step == 2 else "② 거래처 고르기"))
 
+    # 왼쪽은 고르는 자리, 오른쪽은 고른 양식의 계약서 미리보기 — 실제 작성은 화면 3에서 한다
+    pick_col, view_col = st.columns(2)
+    fill = st.session_state.get("fill", {})
     if step == 1:
-        st.radio("저장된 양식 목록", templates["name"].tolist(),
-                 index=None, key="form")
+        form = pick_col.radio("저장된 양식 목록", templates["name"].tolist(), index=None, key="form")
+        body = blank(templates.loc[templates["name"] == form, "body"].iloc[0]) if form else None
+        partner = fill.get("in_partner")
     else:
-        st.radio("저장된 거래처 목록", partners["name"].tolist(),
-                 index=None, key="partner")
+        # 저장된 거래처 = 내가 만들어 내려받은 계약서(Supabase contracts 표)의 거래처 — 가나다 순, 겹치면 하나만
+        mine, _ = my_contracts()
+        saved = sorted({r["partner"] for r in mine}, key=by_name)
+        partner = pick_col.radio("저장된 거래처 목록", saved, index=None, key="partner")
+        if not saved:
+            pick_col.caption("아직 저장된 거래처가 없습니다. 화면 3에서 계약서를 만들어 내려받으면 여기에 쌓입니다.")
+        partner = partner or fill.get("in_partner")
+        body = fill.get("in_content", "")
+
+    with view_col:
+        st.markdown("**미리보기**")
+        if body is None:
+            st.caption("왼쪽에서 양식을 고르면 그 양식의 계약서 모양이 여기에 보입니다.")
+        else:
+            st.code(contract_text(partner or "____", fill.get("in_amount") or "____",
+                                  fill.get("in_date") or "____", body or "____"), language=None)
 
     left, right = st.columns(2)
     left.button("목록으로 돌아가기", width="stretch", on_click=go, args=(SCREEN_1,))
