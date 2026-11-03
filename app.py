@@ -461,6 +461,7 @@ chatbot()
 if st.session_state.screen == SCREEN_3:
     st.warning("아직 예시 결과입니다")
     st.title("계약서 만들기")
+    st.caption("by attoreyoo")
 
     # 화면 1·2에서 담아 둔 내용을 입력칸에 채운다 — 입력칸을 그리기 전에 넣어야 칸에 보인다
     for key, value in st.session_state.pop("fill", {}).items():
@@ -520,6 +521,7 @@ if st.session_state.screen == SCREEN_3:
 elif st.session_state.screen == SCREEN_1:
     st.warning("아직 예시 결과입니다")
     st.title("계약서 목록")
+    st.caption("by attoreyoo")
 
     st.button("+ 계약서 새로 만들기", width="stretch", on_click=start_new)
 
@@ -559,6 +561,7 @@ elif st.session_state.screen == SCREEN_1:
 else:
     st.warning("아직 예시 결과입니다")
     st.title("양식·거래처 선택")
+    st.caption("by attoreyoo")
 
     step = st.session_state.step
     st.caption(("**① 양식 고르기**" if step == 1 else "① 양식 고르기")
