@@ -180,6 +180,10 @@ OTHER = "그 밖의 계약서"
 def save_contract(made):
     """만든 계약서를 Supabase contracts 표에 한 줄로 남긴다 — 어디서 열어도 화면 1 목록에 보인다"""
     partner, amount, date, content = made
+    owner = st.session_state.get("owner", "").strip()
+    if not owner:
+        st.session_state.save_note = ("error", "왼쪽 이름 칸에 이름을 넣어야 계약서 목록에 담깁니다.")
+        return
     supabase = chat_table()
     if supabase is None:
         st.session_state.save_note = ("error", ".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣어야 계약서 목록에 쌓입니다.")
@@ -187,7 +191,7 @@ def save_contract(made):
     try:
         supabase.table("contracts").insert(
             {"form": st.session_state.get("chosen_form", ""), "partner": partner,
-             "amount": amount, "date": date, "content": content},
+             "amount": amount, "date": date, "content": content, "owner": owner},
             returning="minimal",
         ).execute()
         st.session_state.save_note = ("success", "계약서 목록에 담았습니다")
@@ -196,12 +200,16 @@ def save_contract(made):
 
 
 def my_contracts():
-    """Supabase contracts 표에서 내가 만든 계약서를 모두 읽는다 — (목록, 안내 말)"""
+    """Supabase contracts 표에서 owner 가 이름 칸의 이름과 같은 계약서만 읽는다 — (목록, 안내 말)"""
+    owner = st.session_state.get("owner", "").strip()
+    if not owner:
+        return [], "왼쪽 이름 칸에 이름을 넣으면 내가 만든 계약서가 여기에 보입니다."
     supabase = chat_table()
     if supabase is None:
         return [], ".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣으면 내가 만든 계약서가 여기에 보입니다."
     try:
-        return supabase.table("contracts").select("form, partner, amount, date, content").execute().data, None
+        return (supabase.table("contracts").select("form, partner, amount, date, content")
+                .eq("owner", owner).execute().data, None)
     except Exception as e:
         return [], f"내가 만든 계약서를 불러오지 못했습니다: {e}"
 
@@ -455,6 +463,13 @@ st.session_state.last = here
 st.sidebar.button("이전 화면으로 돌아가기", width="stretch", on_click=back,
                   disabled=not st.session_state.history)
 
+# 이름 칸 — 계약서를 저장할 때 owner 에 적고, 목록에는 이 이름으로 저장한 것만 보인다
+if "owner" in st.session_state:
+    st.session_state.owner = st.session_state.owner  # 첫 화면에 다녀와도 넣은 이름이 지워지지 않게 한다
+st.sidebar.text_input("이름", placeholder="예: 홍길동", key="owner")
+if not st.session_state.owner.strip():
+    st.sidebar.warning("이름을 넣어야 계약서를 저장하고 목록을 볼 수 있습니다.")
+
 # 어느 화면에서든 오른쪽 아래에 챗봇이 보인다
 chatbot()
 
@@ -574,10 +589,12 @@ else:
         partner = fill.get("in_partner")
     else:
         # 저장된 거래처 = 내가 만들어 내려받은 계약서(Supabase contracts 표)의 거래처 — 가나다 순, 겹치면 하나만
-        mine, _ = my_contracts()
+        mine, note = my_contracts()
         saved = sorted({r["partner"] for r in mine}, key=by_name)
         partner = pick_col.radio("저장된 거래처 목록", saved, index=None, key="partner")
-        if not saved:
+        if note:
+            pick_col.caption(note)
+        elif not saved:
             pick_col.caption("아직 저장된 거래처가 없습니다. 화면 3에서 계약서를 만들어 내려받으면 여기에 쌓입니다.")
         partner = partner or fill.get("in_partner")
         body = fill.get("in_content", "")
