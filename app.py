@@ -599,3 +599,6 @@ else:
         right.button("다음", width="stretch", on_click=next_step)
     else:
         right.button("적용", width="stretch", on_click=apply)
+
+# 기능 화면 맨 아래 — 마지막으로 고친 날
+st.caption("마지막으로 고친 날 2026-11-03 · 기능 화면 안내 글을 넣음")
