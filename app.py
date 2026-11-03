@@ -459,7 +459,6 @@ st.sidebar.button("이전 화면으로 돌아가기", width="stretch", on_click=
 chatbot()
 
 if st.session_state.screen == SCREEN_3:
-    st.warning("아직 예시 결과입니다")
     st.title("계약서 만들기")
     st.caption("by attoreyoo")
 
@@ -519,7 +518,6 @@ if st.session_state.screen == SCREEN_3:
             down_col.success("다운로드 완료")
 
 elif st.session_state.screen == SCREEN_1:
-    st.warning("아직 예시 결과입니다")
     st.title("계약서 목록")
     st.caption("by attoreyoo")
 
@@ -559,7 +557,6 @@ elif st.session_state.screen == SCREEN_1:
                                key=f"contract_{i}", on_click=pick_contract, args=(row.to_dict(),))
 
 else:
-    st.warning("아직 예시 결과입니다")
     st.title("양식·거래처 선택")
     st.caption("by attoreyoo")
 
