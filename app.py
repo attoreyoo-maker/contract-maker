@@ -147,11 +147,20 @@ def blank(value):
     return "" if value == "(빈칸)" else value
 
 
+def clear_writing():
+    """화면 2·3 을 처음처럼 비운다 — 고른 양식·거래처, 입력칸, 만든 계약서와 그 안내"""
+    for key in FIELDS:
+        st.session_state[key] = ""
+    st.session_state.pop("fill", None)
+    st.session_state.chosen_form = ""
+    st.session_state.form = st.session_state.partner = None
+    st.session_state.made, st.session_state.missing = None, []
+    st.session_state.pop("save_note", None)
+
+
 def start_new():
     """"+ 계약서 새로 만들기" — 빈 입력칸으로 시작해 화면 2로 간다"""
-    st.session_state.fill = {}
-    st.session_state.chosen_form = ""
-    st.session_state.made, st.session_state.missing = None, []
+    clear_writing()
     go(SCREEN_2)
 
 
@@ -160,32 +169,40 @@ def pick_contract(row):
     st.session_state.fill = {"in_partner": blank(row["partner"]), "in_amount": blank(row["amount"]),
                              "in_date": blank(row["date"]), "in_content": blank(row["content"])}
     st.session_state.chosen_form = row.get("form", "")
-    # 그 계약서의 양식을 화면 2 양식 목록에서 미리 골라 두어, 가자마자 미리보기가 보이게 한다
+    # 그 계약서의 양식을 화면 2 양식 목록에서 미리 골라 둔다
     st.session_state.form = st.session_state.chosen_form if st.session_state.chosen_form in templates["name"].tolist() else None
+    st.session_state.partner = None
     st.session_state.made, st.session_state.missing = None, []
     go(SCREEN_2)
 
 
-def next_step():
-    """"다음" — 고른 양식의 본문을 계약내용 칸에 넣을 글로 담아 두고 거래처 고르기로 넘어간다 (수용 기준 7)"""
+def use_form():
+    """화면 2 에서 양식을 고르면 — 그 양식의 본문을 계약내용 칸에 채운다 (그 뒤에 칸에서 고쳐 쓴다)"""
     form = st.session_state.get("form")
     if form:
-        body = templates.loc[templates["name"] == form, "body"].iloc[0]
-        st.session_state.setdefault("fill", {})["in_content"] = blank(body)
+        st.session_state.in_content = blank(templates.loc[templates["name"] == form, "body"].iloc[0])
         st.session_state.chosen_form = form  # 만든 계약서를 목록에서 양식별로 묶을 때 쓴다
-    go(SCREEN_2, 2)
 
 
-def apply():
-    """"적용" — 고른 거래처를 거래처명 칸에 넣을 글로 담아 두고 화면 3으로 간다 (수용 기준 8)"""
-    partner = st.session_state.get("partner")
-    if partner:
-        st.session_state.setdefault("fill", {})["in_partner"] = blank(partner)
+def use_partner():
+    """화면 2 에서 저장된 거래처를 고르면 — 거래처명 칸에 채운다"""
+    if st.session_state.get("partner"):
+        st.session_state.in_partner = st.session_state.partner
+
+
+def to_make():
+    """"다음" — 화면 2 에서 쓴 계약서를 들고 화면 3(만들기·다운로드)으로 간다"""
+    st.session_state.made, st.session_state.missing = None, []
     go(SCREEN_3)
 
 
-# 화면 3 입력칸 — 비어 있을 때 보여 줄 말도 함께 둔다
+# 화면 2 입력칸 — 비어 있을 때 보여 줄 말도 함께 둔다
 FIELDS = {"in_partner": "거래처명을", "in_amount": "금액을", "in_date": "날짜를", "in_content": "계약내용을"}
+
+# 입력칸·양식·거래처 고르기는 화면 2 에만 있으므로, 화면 3 으로 넘어가도 지워지지 않게 붙잡아 둔다
+for key in [*FIELDS, "form", "partner"]:
+    if key in st.session_state:
+        st.session_state[key] = st.session_state[key]
 
 
 def make():
@@ -428,6 +445,8 @@ def open_page(page):
         go(SCREEN_1)  # 「시작하기」를 누르면 늘 화면 1(계약서 목록)부터 보인다
         st.session_state.history = []
         st.session_state.pop("last", None)
+        st.session_state.preview = None  # 첫 화면에 다녀와도 미리보기는 접힌 채로 시작한다
+        clear_writing()  # 화면 2·3 에 쓰던 계약서도 비운다
 
 
 def back():
@@ -492,6 +511,9 @@ here = (st.session_state.screen, st.session_state.step)
 if st.session_state.get("last", here) != here:
     st.session_state.history.append(st.session_state.last)
     st.session_state.guide = False  # 다른 화면에 다녀오면 계약서 작성방법은 닫힌 채 목록부터 보인다
+    st.session_state.preview = None  # 예시 계약서 미리보기도 접힌 채로 보인다 — 「미리보기」를 눌러야 다시 펼쳐진다
+    if st.session_state.screen == SCREEN_1:
+        clear_writing()  # 화면 1 에 오면 화면 2·3 에 쓰던 계약서를 비운다 (화면 2↔3 을 오갈 때는 남겨 둔다)
 st.session_state.last = here
 
 # 화면 고르기 바로 밑 — 바로 전 화면으로 돌아가는 버튼 (돌아갈 화면이 없으면 눌리지 않는다)
@@ -512,40 +534,36 @@ if st.session_state.screen == SCREEN_3:
     st.title("계약서 만들기")
     st.caption("by attoreyoo")
 
-    # 화면 1·2에서 담아 둔 내용을 입력칸에 채운다 — 입력칸을 그리기 전에 넣어야 칸에 보인다
-    for key, value in st.session_state.pop("fill", {}).items():
-        st.session_state[key] = value
-
-    # 왼쪽 열은 넣는 자리, 오른쪽 열은 결과 자리 — 두 열의 가로 길이를 똑같이 둔다
-    left, center = st.columns(2)
-
-    with left:
-        st.text_input("거래처명", placeholder="예: (주)한빛상사", key="in_partner")
-        st.text_input("금액", placeholder="예: 5,000,000원", key="in_amount")
-        st.text_input("날짜", placeholder="예: 2026.09.17", key="in_date")
-        st.text_area("계약내용", placeholder="계약 조건 및 상세 내용 입력", key="in_content",
-                     height=260)  # 계약내용은 길게 쓰므로 칸을 높게 둔다
-
-    # 결과 자리 — "만들기"로 만든 계약서가 펼쳐진다 (수용 기준 1)
+    # 입력칸은 화면 2 에 있다 — 여기서는 화면 2 에서 쓴 계약서를 만들고 내려받기만 한다
     made = st.session_state.get("made")
     if made:
+        # "만들기"로 만든 계약서가 펼쳐진다 (수용 기준 1)
         partner, amount, date, content = made
-        center.code(contract_text(partner, amount, date, content), language=None)
+        st.code(contract_text(partner, amount, date, content), language=None)
     else:
-        center.caption("왼쪽 칸을 모두 채우고 \"만들기\"를 누르면 여기에 계약서가 펼쳐집니다.")
+        st.caption('화면 2에서 쓴 계약서입니다. "만들기"를 누르면 계약서가 만들어지고 PDF 로 내려받아집니다. '
+                   '고칠 곳이 있으면 왼쪽 "이전 화면으로 돌아가기"를 눌러 화면 2에서 고치세요.')
+        st.code(contract_text(*(st.session_state.get(key, "").strip() or "____" for key in FIELDS)), language=None)
 
     # 버튼 줄 — "만들기"와 "다운로드"를 같은 높이에 나란히 둔다
     make_col, down_col = st.columns(2)
     make_col.button("만들기", width="stretch", on_click=make)
 
-    # 빈 칸을 하나씩 짚어 보여 준다 (수용 기준 3)
+    # 빈 칸을 하나씩 짚어 보여 준다 (수용 기준 3) — 채우는 곳은 화면 2
     for word in st.session_state.get("missing", []):
         make_col.error(f"{word} 넣지 않았습니다")
+    if st.session_state.get("missing"):
+        make_col.button("화면 2에서 채우러 가기", width="stretch", on_click=go, args=(SCREEN_2,))
 
     # 계약서 목록(Supabase)에 담았는지 알려 준다
     if made and st.session_state.get("save_note"):
         kind, note = st.session_state.save_note
         getattr(make_col, kind)(note)
+
+    def done_download():
+        """「다운로드 완료」 — 화면 오른쪽 아래에 잠깐 떴다가 몇 초 뒤 저절로 사라진다.
+        그래서 지난번 안내가 남아 있지 않고, 다시 내려받을 때마다 새로 뜬다"""
+        st.toast("다운로드 완료", icon="✅")
 
     # 다운로드 — 계약서_거래처명_날짜.pdf 로 내려받는다 (수용 기준 4)
     # 버튼은 늘 보이게 두고, "만들기" 전에는 눌리지 않게 막아 둔다
@@ -555,7 +573,7 @@ if st.session_state.screen == SCREEN_3:
         pdf = contract_pdf(partner, amount, date, content)
         if down_col.download_button("다운로드", pdf, file_name=file_name(partner, date),
                                     mime="application/pdf", width="stretch"):
-            down_col.success("다운로드 완료")
+            done_download()
 
         # "만들기"를 누른 바로 그때 한 번만 PDF 를 저절로 내려받는다
         if st.session_state.pop("auto_download", False):
@@ -565,7 +583,7 @@ if st.session_state.screen == SCREEN_3:
                 <script>document.getElementById("auto-pdf").click();</script>""",
                 unsafe_allow_javascript=True,
             )
-            down_col.success("다운로드 완료")
+            done_download()
 
 elif st.session_state.screen == SCREEN_1 and st.session_state.get("guide"):
     # 계약서 작성방법 — 올려 받은 「계약서 작성방법.pdf」 글(data/contract_guide.md)을 한 화면에 모두 보여 준다
@@ -610,57 +628,57 @@ elif st.session_state.screen == SCREEN_1:
             st.caption('아직 없습니다. 화면 3에서 "만들기"를 누르면 여기에 쌓입니다.')
 
     # 예시 계약서 (data/sample_contracts.csv, 양식마다 1개) — 진짜 계약서와 헷갈리지 않게 상자에 담고 「예시」라고 적는다
+    # 「미리보기」를 누르면 화면 1 안에서 그 양식의 계약서가 펼쳐지고, 한 번 더 누르면 접힌다
+    def toggle_preview(i):
+        st.session_state.preview = None if st.session_state.get("preview") == i else i
+
     with st.container(border=True):
         st.markdown("**예시 계약서 (샘플)**")
-        st.caption("실제 계약서가 아닌 보기용 예시입니다. 눌러서 어떻게 쓰는지 살펴볼 수 있습니다.")
+        st.caption("실제 계약서가 아닌 보기용 예시입니다. 「미리보기」를 눌러 양식마다 계약서 모양을 살펴볼 수 있습니다.")
         cols = st.columns(3)
         for i, row in samples.iterrows():
             cols[i % 3].markdown(f"**{row.form}**")  # 「예시 계약서 (샘플)」 제목과 같은 크기·굵기
-            cols[i % 3].button(f"{row.partner}  ·  {row.amount}  ·  {row.date}", width="stretch",
-                               key=f"contract_{i}", on_click=pick_contract, args=(row.to_dict(),))
+            cols[i % 3].button("미리보기", width="stretch", key=f"contract_{i}",
+                               on_click=toggle_preview, args=(i,))
+        shown = st.session_state.get("preview")
+        if shown is not None and shown in samples.index:
+            row = samples.loc[shown]
+            st.markdown(f"**{row.form} 미리보기**")
+            st.code(contract_text(blank(row.partner), blank(row.amount), blank(row.date), blank(row.content)),
+                    language=None)
 
 else:
-    st.title("양식·거래처 선택")
+    st.title("계약서 작성")
     st.caption("by attoreyoo")
 
-    step = st.session_state.step
-    st.caption(("**① 양식 고르기**" if step == 1 else "① 양식 고르기")
-               + "  ─────  "
-               + ("**② 거래처 고르기**" if step == 2 else "② 거래처 고르기"))
+    # 화면 1 에서 담아 둔 내용을 입력칸에 채운다 — 입력칸을 그리기 전에 넣어야 칸에 보인다
+    for key, value in st.session_state.pop("fill", {}).items():
+        st.session_state[key] = value
 
-    # 왼쪽은 고르는 자리, 오른쪽은 고른 양식의 계약서 미리보기 — 실제 작성은 화면 3에서 한다
-    pick_col, view_col = st.columns(2)
-    fill = st.session_state.get("fill", {})
-    if step == 1:
-        form = pick_col.radio("저장된 양식 목록", templates["name"].tolist(), index=None, key="form")
-        body = blank(templates.loc[templates["name"] == form, "body"].iloc[0]) if form else None
-        partner = fill.get("in_partner")
-    else:
-        # 저장된 거래처 = 내가 만들어 내려받은 계약서(Supabase contracts 표)의 거래처 — 가나다 순, 겹치면 하나만
+    # 왼쪽은 고르는 자리, 오른쪽은 계약서를 쓰는 자리 — 양식을 고르면 그 본문이 계약내용 칸에 채워지고, 칸에서 고쳐 쓴다
+    pick_col, write_col = st.columns([1, 2])
+    with pick_col:
+        st.radio("저장된 양식 목록", templates["name"].tolist(), index=None, key="form", on_change=use_form)
+
+        # 저장된 거래처 = 내가 만든 계약서(Supabase contracts 표)의 거래처 — 가나다 순, 겹치면 하나만
         mine, note = my_contracts()
         saved = sorted({r["partner"] for r in mine}, key=by_name)
-        partner = pick_col.radio("저장된 거래처 목록", saved, index=None, key="partner")
+        st.radio("저장된 거래처 목록", saved, index=None, key="partner", on_change=use_partner)
         if note:
-            pick_col.caption(note)
+            st.caption(note)
         elif not saved:
-            pick_col.caption("아직 저장된 거래처가 없습니다. 화면 3에서 계약서를 만들어 내려받으면 여기에 쌓입니다.")
-        partner = partner or fill.get("in_partner")
-        body = fill.get("in_content", "")
+            st.caption("아직 저장된 거래처가 없습니다. 거래처명 칸에 직접 쓰세요.")
 
-    with view_col:
-        st.markdown("**미리보기**")
-        if body is None:
-            st.caption("왼쪽에서 양식을 고르면 그 양식의 계약서 모양이 여기에 보입니다.")
-        else:
-            st.code(contract_text(partner or "____", fill.get("in_amount") or "____",
-                                  fill.get("in_date") or "____", body or "____"), language=None)
+    with write_col:
+        st.text_input("거래처명", placeholder="예: (주)한빛상사", key="in_partner")
+        st.text_input("금액", placeholder="예: 5,000,000원", key="in_amount")
+        st.text_input("날짜", placeholder="예: 2026.09.17", key="in_date")
+        st.text_area("계약내용", placeholder="왼쪽에서 양식을 고르면 그 본문이 여기에 채워집니다. 채워진 글을 고쳐 쓰세요.",
+                     key="in_content", height=500)  # 양식 본문이 길어서 칸을 높게 둔다
 
     left, right = st.columns(2)
     left.button("목록으로 돌아가기", width="stretch", on_click=go, args=(SCREEN_1,))
-    if step == 1:
-        right.button("다음", width="stretch", on_click=next_step)
-    else:
-        right.button("적용", width="stretch", on_click=apply)
+    right.button("다음", width="stretch", on_click=to_make)
 
 # 기능 화면 맨 아래 — 마지막으로 고친 날
 st.caption("마지막으로 고친 날 2026-11-03 · 기능 화면 안내 글을 넣음")
