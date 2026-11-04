@@ -446,11 +446,13 @@ if st.session_state.page == "landing":
     st.stop()
 
 # 기능 화면 사이드바 맨 위 — 첫 화면으로 돌아가는 버튼
-st.sidebar.button("첫 화면으로 돌아가기", width="stretch", on_click=open_page, args=("landing",))
+st.sidebar.button("첫 화면으로 돌아가기", key="go_landing", width="stretch", on_click=open_page, args=("landing",))
 
 # 사이드바 가로 길이를 줄여 가운데 화면을 넓힌다
 st.html("""<style>
   [data-testid="stSidebar"] { width: 240px !important; min-width: 240px !important; max-width: 240px !important; }
+  /* 「첫 화면으로 돌아가기」·「이전 화면으로 돌아가기」 글씨는 「계약서 작성방법 확인하기」와 같은 빨간색 */
+  .st-key-go_landing button p, .st-key-go_back button p { color: #ff4b4b; }
 </style>""")
 
 # 이 서비스가 해 주는 일 (한 줄)
@@ -467,7 +469,7 @@ if st.session_state.get("last", here) != here:
 st.session_state.last = here
 
 # 화면 고르기 바로 밑 — 바로 전 화면으로 돌아가는 버튼 (돌아갈 화면이 없으면 눌리지 않는다)
-st.sidebar.button("이전 화면으로 돌아가기", width="stretch", on_click=back,
+st.sidebar.button("이전 화면으로 돌아가기", key="go_back", width="stretch", on_click=back,
                   disabled=not (st.session_state.history or st.session_state.get("guide")))
 
 # 이름 칸 — 계약서를 저장할 때 owner 에 적고, 목록에는 이 이름으로 저장한 것만 보인다
