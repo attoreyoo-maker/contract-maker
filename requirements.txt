@@ -1,7 +1,5 @@
 # 모든 화면 파일의 바탕 — 화면 틀, 입력칸, 버튼, 표를 그린다
 streamlit
-# app.py 에서 st.login 으로 구글 계정 로그인을 한다
-Authlib>=1.3.2
 # app.py 에서 견본 계약서·양식 CSV 를 읽고, lunch.py·subs.py 에서 가게·구독 목록을 표로 만든다
 pandas
 # practice_table.py 를 뺀 화면 파일에서 .env 에 적은 키(SUPABASE_URL, ANTHROPIC_API_KEY 등)를 불러온다

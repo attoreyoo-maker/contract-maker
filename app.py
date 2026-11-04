@@ -391,13 +391,6 @@ def past_chats():
                 st.markdown(row["answer"].replace("\n", "  \n"))
 
 
-# 구글 로그인 — 구글 계정으로 들어와야 화면이 보인다 (키는 .streamlit/secrets.toml 의 [auth] 에 넣는다)
-if not st.user.is_logged_in:
-    st.title("계약서 만들기")
-    st.write("구글 계정으로 들어오면 계약서 만들기를 쓸 수 있습니다.")
-    st.button("구글로 로그인", on_click=st.login, args=("google",))
-    st.stop()
-
 # 첫 화면(랜딩 페이지) — streamlit run app.py 로 열면 이 화면이 먼저 뜬다
 if "page" not in st.session_state:
     st.session_state.page = "landing"
@@ -449,9 +442,6 @@ if st.session_state.page == "landing":
     _, mid, _ = st.columns([2, 1, 2])
     mid.button("시작하기", key="start", width="stretch", on_click=open_page, args=("app",))
     st.stop()
-
-# 기능 화면 맨 위 — 구글 계정으로 들어온 사람의 이름
-st.markdown(f"**{st.user.get('name') or st.user.get('email')}** 님")
 
 # 기능 화면 사이드바 맨 위 — 첫 화면으로 돌아가는 버튼
 st.sidebar.button("첫 화면으로 돌아가기", width="stretch", on_click=open_page, args=("landing",))
