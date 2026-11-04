@@ -561,9 +561,15 @@ if st.session_state.screen == SCREEN_3:
         getattr(make_col, kind)(note)
 
     def done_download():
-        """「다운로드 완료」 — 화면 오른쪽 아래에 잠깐 떴다가 몇 초 뒤 저절로 사라진다.
-        그래서 지난번 안내가 남아 있지 않고, 다시 내려받을 때마다 새로 뜬다"""
-        st.toast("다운로드 완료", icon="✅")
+        """「다운로드 완료」 — 다운로드 버튼 바로 밑에 떴다가 2초 뒤 서서히 사라진다.
+        내려받을 때마다 번호를 바꿔 새 안내로 그리므로, 다시 내려받으면 또 뜬다"""
+        st.session_state.download_n = st.session_state.get("download_n", 0) + 1
+        down_col.html(f"""<style>
+          @keyframes download-fade {{ to {{ opacity: 0; visibility: hidden; }} }}
+          .download-done {{ padding: 0.75rem 1rem; border-radius: 0.5rem; background: rgba(33, 195, 84, 0.1);
+                            color: rgb(23, 114, 51); animation: download-fade 1s ease 2s forwards; }}
+        </style>
+        <div class="download-done" data-n="{st.session_state.download_n}">✅ 다운로드 완료</div>""")
 
     # 다운로드 — 계약서_거래처명_날짜.pdf 로 내려받는다 (수용 기준 4)
     # 버튼은 늘 보이게 두고, "만들기" 전에는 눌리지 않게 막아 둔다
