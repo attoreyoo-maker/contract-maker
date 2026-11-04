@@ -406,7 +406,9 @@ def open_page(page):
 
 def back():
     """"이전 화면으로 돌아가기" — 누를 때마다 지나온 화면을 하나씩 거꾸로 되돌아간다"""
-    if st.session_state.history:
+    if st.session_state.get("guide"):
+        st.session_state.guide = False  # 계약서 작성방법을 보고 있으면 먼저 그것을 닫고 계약서 목록으로 돌아간다
+    elif st.session_state.history:
         st.session_state.screen, st.session_state.step = st.session_state.history.pop()
         st.session_state.last = (st.session_state.screen, st.session_state.step)
 
@@ -461,11 +463,12 @@ st.sidebar.radio("화면", [SCREEN_1, SCREEN_2, SCREEN_3], key="screen")
 here = (st.session_state.screen, st.session_state.step)
 if st.session_state.get("last", here) != here:
     st.session_state.history.append(st.session_state.last)
+    st.session_state.guide = False  # 다른 화면에 다녀오면 계약서 작성방법은 닫힌 채 목록부터 보인다
 st.session_state.last = here
 
 # 화면 고르기 바로 밑 — 바로 전 화면으로 돌아가는 버튼 (돌아갈 화면이 없으면 눌리지 않는다)
 st.sidebar.button("이전 화면으로 돌아가기", width="stretch", on_click=back,
-                  disabled=not st.session_state.history)
+                  disabled=not (st.session_state.history or st.session_state.get("guide")))
 
 # 이름 칸 — 계약서를 저장할 때 owner 에 적고, 목록에는 이 이름으로 저장한 것만 보인다
 if "owner" in st.session_state:
@@ -536,8 +539,21 @@ if st.session_state.screen == SCREEN_3:
             )
             down_col.success("다운로드 완료")
 
+elif st.session_state.screen == SCREEN_1 and st.session_state.get("guide"):
+    # 계약서 작성방법 — 올려 받은 「계약서 작성방법.pdf」 글(data/contract_guide.md)을 한 화면에 모두 보여 준다
+    st.title("계약서 작성방법")
+    st.markdown((DATA / "contract_guide.md").read_text(encoding="utf-8"))
+
 elif st.session_state.screen == SCREEN_1:
-    st.title("계약서 목록")
+    # 제목 줄 가운데에 빨간 글씨 상자 「계약서 작성방법 확인하기」 — 누르면 작성방법 화면이 펼쳐진다
+    # 글씨 크기·굵기는 「내가 만든 계약서」(st.subheader) 제목과 같게 둔다
+    st.html("""<style>
+      .st-key-guide_open button p { color: #ff4b4b; font-size: 1.75rem; font-weight: 600; }
+    </style>""")
+    title_col, guide_col, _ = st.columns(3, vertical_alignment="center")
+    title_col.title("계약서 목록")
+    guide_col.button("계약서 작성방법 확인하기", key="guide_open", width="stretch",
+                     on_click=lambda: st.session_state.update(guide=True))
     st.caption("by attoreyoo")
 
     st.button("+ 계약서 새로 만들기", width="stretch", on_click=start_new)
