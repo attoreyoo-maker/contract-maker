@@ -55,42 +55,68 @@ samples = load("sample_contracts.csv")  # 화면 1 예시 계약서 — 양식�
 templates = load("templates.csv")
 
 
-# PDF 에 쓰는 한글 글꼴 — 윈도우에 들어 있는 맑은 고딕
-FONT = "C:/Windows/Fonts/malgun.ttf"
+# PDF 에 쓰는 한글 글꼴 — 내 컴퓨터(윈도우)는 맑은 고딕, 맑은 고딕이 없는 Streamlit Cloud 는
+# packages.txt 의 fonts-nanum 으로 설치한 나눔고딕을 쓴다
+FONT = next((f for f in ["C:/Windows/Fonts/malgun.ttf", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"]
+             if Path(f).exists()), "C:/Windows/Fonts/malgun.ttf")
 
 
 def wrap(draw, text, font, width):
-    """글을 정해진 가로 길이에 맞춰 여러 줄로 나눈다 (줄바꿈도 그대로 살린다)"""
+    """글을 정해진 가로 길이에 맞춰 여러 줄로 나눈다 (줄바꿈도 그대로 살린다)
+    띄어쓰기 자리에서 줄을 바꾸고, 한 낱말이 한 줄보다 길 때만 낱말 중간에서 자른다"""
     lines = []
     for para in text.split("\n"):
         line = ""
-        for ch in para:
-            if draw.textlength(line + ch, font=font) > width:
-                lines.append(line)
+        for word in re.split(r"(?<= )", para):  # 낱말 뒤의 띄어쓰기를 낱말에 붙여 둔 채 나눈다
+            if line and draw.textlength(line + word.rstrip(), font=font) > width:
+                lines.append(line.rstrip())
                 line = ""
-            line += ch
-        lines.append(line)
+            for ch in word:
+                if draw.textlength(line + ch, font=font) > width:
+                    lines.append(line)
+                    line = ""
+                line += ch
+        lines.append(line.rstrip())
     return lines
 
 
 def contract_pdf(partner, amount, date, content):
-    """계약서를 A4 한 장짜리 .pdf 파일 내용으로 만든다 — 새 도구 없이 Pillow 로 그림을 그려 PDF 로 저장한다"""
-    page = Image.new("RGB", (1240, 1754), "white")  # A4 종이 (150dpi)
-    draw = ImageDraw.Draw(page)
+    """계약서를 A4 .pdf 파일 내용으로 만든다 — 계약내용이 길면 다음 장으로 이어서 여러 장이 된다.
+    새 도구 없이 Pillow 로 장마다 그림을 그려 한 PDF 로 묶는다"""
+    W, H, LEFT, BOTTOM = 1240, 1754, 140, 1754 - 150  # A4 종이 (150dpi), 왼쪽 여백, 글을 쓸 수 있는 맨 아래
     title, body = ImageFont.truetype(FONT, 56), ImageFont.truetype(FONT, 30)
+    small = ImageFont.truetype(FONT, 24)  # 계약내용은 길어서 조금 작은 글씨로 쓴다
+    pages = []
 
-    draw.text((620, 160), "계  약  서", font=title, fill="black", anchor="mm")
+    def new_page():
+        pages.append(Image.new("RGB", (W, H), "white"))
+        return ImageDraw.Draw(pages[-1]), 150
+
+    draw, _ = new_page()
+    draw.text((W // 2, 160), "계  약  서", font=title, fill="black", anchor="mm")
     y = 300
-    for label, value in [("거래처명 (을)", partner), ("계약 금액", amount),
-                         ("계약 날짜", date), ("계약 내용", content)]:
-        draw.text((140, y), label, font=body, fill="black")
-        for line in wrap(draw, value, body, 1240 - 400 - 140):
+    for label, value in [("거래처명 (을)", partner), ("계약 금액", amount), ("계약 날짜", date)]:
+        draw.text((LEFT, y), label, font=body, fill="black")
+        for line in wrap(draw, value, body, W - 400 - LEFT):
             draw.text((400, y), line, font=body, fill="black")
             y += 50
         y += 30
 
+    # 계약내용 — 제목 아래에 종이 폭을 다 써서 쓰고, 장이 차면 새 장으로 넘어간다
+    draw.text((LEFT, y), "계약 내용", font=body, fill="black")
+    y += 60
+    for line in wrap(draw, content, small, W - 2 * LEFT):
+        if y > BOTTOM:
+            draw, y = new_page()
+        draw.text((LEFT, y), line, font=small, fill="black")
+        y += 38
+
+    # 장마다 맨 아래 가운데에 쪽 번호 (- 1 / 3 -)
+    for i, page in enumerate(pages, 1):
+        ImageDraw.Draw(page).text((W // 2, H - 80), f"- {i} / {len(pages)} -", font=small, fill="gray", anchor="mm")
+
     out = io.BytesIO()
-    page.save(out, "PDF", resolution=150)
+    pages[0].save(out, "PDF", resolution=150, save_all=True, append_images=pages[1:])
     return out.getvalue()
 
 
