@@ -1,4 +1,4 @@
--- 앱(app.py)에서 "만들기"로 만든 계약서를 쌓아 두는 Supabase 의 contracts 표를 만든다.
+ -- 앱(app.py)에서 "만들기"로 만든 계약서를 쌓아 두는 Supabase 의 contracts 표를 만든다.
 -- 이미 표가 있으면 그대로 두므로, 여러 번 실행해도 쌓인 계약서는 지워지지 않는다.
 
 begin;
@@ -11,8 +11,12 @@ create table if not exists public.contracts (
   partner    text not null,
   amount     text not null,
   date       text not null,             -- 화면에 넣은 글 그대로 (예: 2026.09.17)
-  content    text not null
+  content    text not null,
+  owner      text not null default ''   -- 만든 사람 이름 (화면 1 에서 내 계약서만 골라 보일 때 쓴다)
 );
+
+-- 표가 이미 있고 owner 칸만 없을 때 owner 칸을 덧붙인다
+alter table public.contracts add column if not exists owner text not null default '';
 
 -- 2. 화면(로그인 없이 anon 키로 접속)에서 읽기·넣기만 허용
 alter table public.contracts enable row level security;

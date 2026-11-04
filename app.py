@@ -173,7 +173,7 @@ def make():
 
 
 # 화면 1 에서 내가 만든 계약서를 묶는 양식 — 이 셋이 아닌 양식으로 만든 것은 맨 아래 "그 밖의 계약서"에 둔다
-FORMS = ["기본 계약서 양식", "용역 계약서 양식", "납품 계약서 양식"]
+FORMS = ["표준계약서 양식", "용역계약서 양식", "납품계약서 양식"]
 OTHER = "그 밖의 계약서"
 
 
@@ -208,8 +208,12 @@ def my_contracts():
     if supabase is None:
         return [], ".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣으면 내가 만든 계약서가 여기에 보입니다."
     try:
-        return (supabase.table("contracts").select("form, partner, amount, date, content")
-                .eq("owner", owner).execute().data, None)
+        rows = (supabase.table("contracts").select("form, partner, amount, date, content")
+                .eq("owner", owner).execute().data)
+        # 예전 이름("기본 계약서 양식" 처럼 띄어 쓴 것)으로 저장된 계약서도 지금 양식 이름으로 묶는다
+        for r in rows:
+            r["form"] = r["form"].replace(" 계약서 양식", "계약서 양식").replace("기본계약서 양식", "표준계약서 양식")
+        return rows, None
     except Exception as e:
         return [], f"내가 만든 계약서를 불러오지 못했습니다: {e}"
 
@@ -387,6 +391,13 @@ def past_chats():
                 st.markdown(row["answer"].replace("\n", "  \n"))
 
 
+# 구글 로그인 — 구글 계정으로 들어와야 화면이 보인다 (키는 .streamlit/secrets.toml 의 [auth] 에 넣는다)
+if not st.user.is_logged_in:
+    st.title("계약서 만들기")
+    st.write("구글 계정으로 들어오면 계약서 만들기를 쓸 수 있습니다.")
+    st.button("구글로 로그인", on_click=st.login, args=("google",))
+    st.stop()
+
 # 첫 화면(랜딩 페이지) — streamlit run app.py 로 열면 이 화면이 먼저 뜬다
 if "page" not in st.session_state:
     st.session_state.page = "landing"
@@ -438,6 +449,9 @@ if st.session_state.page == "landing":
     _, mid, _ = st.columns([2, 1, 2])
     mid.button("시작하기", key="start", width="stretch", on_click=open_page, args=("app",))
     st.stop()
+
+# 기능 화면 맨 위 — 구글 계정으로 들어온 사람의 이름
+st.markdown(f"**{st.user.get('name') or st.user.get('email')}** 님")
 
 # 기능 화면 사이드바 맨 위 — 첫 화면으로 돌아가는 버튼
 st.sidebar.button("첫 화면으로 돌아가기", width="stretch", on_click=open_page, args=("landing",))
