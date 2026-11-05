@@ -224,9 +224,9 @@ OTHER = "그 밖의 계약서"
 def save_contract(made):
     """만든 계약서를 Supabase contracts 표에 한 줄로 남긴다 — 어디서 열어도 화면 1 목록에 보인다"""
     partner, amount, date, content = made
-    owner = st.session_state.get("owner", "").strip()
+    owner = my_email()
     if not owner:
-        st.session_state.save_note = ("error", "왼쪽 이름 칸에 이름을 넣어야 계약서 목록에 담깁니다.")
+        st.session_state.save_note = ("error", "구글 계정으로 로그인해야 계약서 목록에 담깁니다.")
         return
     supabase = chat_table()
     if supabase is None:
@@ -243,23 +243,44 @@ def save_contract(made):
         st.session_state.save_note = ("error", f"계약서를 Supabase 에 남기지 못했습니다: {e}")
 
 
+def my_email():
+    """로그인한 사람의 구글 메일 — 계약서의 owner 로 저장한다"""
+    return (st.user.get("email") or "").strip().lower()
+
+
 def my_contracts():
-    """Supabase contracts 표에서 owner 가 이름 칸의 이름과 같은 계약서만 읽는다 — (목록, 안내 말)"""
-    owner = st.session_state.get("owner", "").strip()
+    """Supabase contracts 표에서 owner 가 내 메일인 계약서만 읽는다 (관리자는 전체) — (목록, 안내 말)
+    이름 칸으로 쌓였던 예전 줄은 owner 가 이름이라 관리자에게만 보인다 (지우거나 고치지 않는다)"""
+    owner = my_email()
     if not owner:
-        return [], "왼쪽 이름 칸에 이름을 넣으면 내가 만든 계약서가 여기에 보입니다."
+        return [], "구글 계정으로 로그인하면 내가 만든 계약서가 여기에 보입니다."
     supabase = chat_table()
     if supabase is None:
         return [], ".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣으면 내가 만든 계약서가 여기에 보입니다."
     try:
-        rows = (supabase.table("contracts").select("form, partner, amount, date, content")
-                .eq("owner", owner).execute().data)
+        query = supabase.table("contracts").select("form, partner, amount, date, content, owner")
+        if not is_admin():
+            query = query.eq("owner", owner)
+        rows = query.execute().data
         # 예전 이름("기본 계약서 양식" 처럼 띄어 쓴 것)으로 저장된 계약서도 지금 양식 이름으로 묶는다
         for r in rows:
             r["form"] = r["form"].replace(" 계약서 양식", "계약서 양식").replace("기본계약서 양식", "표준계약서 양식")
         return rows, None
     except Exception as e:
         return [], f"내가 만든 계약서를 불러오지 못했습니다: {e}"
+
+
+def all_contracts():
+    """관리 화면 — Supabase contracts 표의 모든 줄을 읽은 그대로 돌려준다 (관리자가 아니면 읽지 않는다) — (목록, 안내 말)"""
+    if not is_admin():
+        return [], "관리자만 볼 수 있습니다."
+    supabase = chat_table()
+    if supabase is None:
+        return [], ".env 에 SUPABASE_URL 과 SUPABASE_KEY 를 넣으면 모든 계약서가 여기에 보입니다."
+    try:
+        return supabase.table("contracts").select("*").order("id").execute().data, None
+    except Exception as e:
+        return [], f"계약서 표를 불러오지 못했습니다: {e}"
 
 
 def by_name(partner):
@@ -451,23 +472,29 @@ def google_login():
         st.session_state.login_error = str(e)
 
 
-# 구글 로그인 — 구글 계정으로 들어와야 화면이 보인다 (키는 .streamlit/secrets.toml 의 [auth] 에 넣는다)
-if has_auth() and not st.user.get("is_logged_in"):
-    st.title("계약서 만들기")
-    st.write("구글 계정으로 들어오면 계약서 만들기를 쓸 수 있습니다.")
-    st.button("구글로 로그인", on_click=google_login)
-    if st.session_state.get("login_error"):
-        st.error("로그인 설정(secrets 의 [auth])에 문제가 있습니다. 아래 원인을 보고 고친 뒤 앱을 다시 켜세요.\n\n"
-                 + st.session_state.login_error)
-    st.stop()
+LOGIN_FRESH = 300  # 구글 로그인을 마친 지 이 초(5분) 안이면 "이번 접속에서 로그인했다"로 본다
+
+
+def just_logged_in():
+    """구글에서 막 로그인하고 돌아왔는지 — 로그인 기록은 브라우저에 30일 남으므로,
+    구글이 적어 준 로그인 시각(iat)이 방금이어야 이번 접속에서 로그인한 것으로 본다"""
+    iat = st.user.get("iat")
+    if not st.user.get("is_logged_in") or not isinstance(iat, (int, float)):
+        return False
+    return abs(datetime.now(timezone.utc).timestamp() - iat) < LOGIN_FRESH
+
 
 # 첫 화면(랜딩 페이지) — streamlit run app.py 로 열면 이 화면이 먼저 뜬다
+# 구글 로그인을 막 마치고 돌아왔으면 「시작하기」를 다시 누르지 않게 곧장 기능 화면으로 간다
 if "page" not in st.session_state:
-    st.session_state.page = "landing"
+    st.session_state.page = "app" if has_auth() and just_logged_in() else "landing"
 
 
 def is_admin():
-    """들어온 사람(st.user)의 메일이 secrets 의 ADMIN_EMAILS 목록에 있으면 관리자다"""
+    """구글로 로그인한 사람(st.user)의 메일이 secrets 의 ADMIN_EMAILS 목록에 있으면 관리자다
+    로그인하지 않았으면 메일 값이 있어도 관리자가 아니다"""
+    if not st.user.get("is_logged_in"):
+        return False
     email = (st.user.get("email") or "").strip().lower()
     try:
         admins = st.secrets.get("ADMIN_EMAILS", [])
@@ -495,6 +522,8 @@ def back():
         st.session_state.admin_view = False  # 관리 화면을 보고 있으면 먼저 그것을 닫는다
     elif st.session_state.get("guide"):
         st.session_state.guide = False  # 계약서 작성방법을 보고 있으면 먼저 그것을 닫고 계약서 목록으로 돌아간다
+    elif st.session_state.get("preview") is not None:
+        st.session_state.preview = None  # 화면 1 예시 계약서 미리보기(세 양식 모두)가 펼쳐져 있으면 접어서, 「시작하기」 직후 화면으로 돌아간다
     elif st.session_state.history:
         st.session_state.screen, st.session_state.step = st.session_state.history.pop()
         st.session_state.last = (st.session_state.screen, st.session_state.step)
@@ -532,9 +561,27 @@ if st.session_state.page == "landing":
     mid.button("시작하기", key="start", width="stretch", on_click=open_page, args=("app",))
     st.stop()
 
-# 기능 화면 맨 위 — 구글 계정으로 들어온 사람의 이름
+# 구글 로그인 — 「시작하기」 뒤, 접속할 때마다 「구글로 로그인」을 눌러 구글 계정으로 들어와야 기능 화면이 보인다
+# (키는 .streamlit/secrets.toml 의 [auth] 에 넣는다. 한 번 들어오면 그 접속 동안은 다시 묻지 않는다)
+if has_auth() and not st.session_state.get("signed_in") and just_logged_in():
+    st.session_state.signed_in = True
+if has_auth() and not st.session_state.get("signed_in"):
+    st.title("계약서 만들기")
+    st.write("구글 계정으로 들어오면 계약서 만들기를 쓸 수 있습니다.")
+    st.button("구글로 로그인", on_click=google_login)
+    if st.session_state.get("login_error"):
+        st.error("로그인 설정(secrets 의 [auth])에 문제가 있습니다. 아래 원인을 보고 고친 뒤 앱을 다시 켜세요.\n\n"
+                 + st.session_state.login_error)
+    st.stop()
+
+# 기능 화면 맨 위 — 구글 계정으로 들어온 사람의 이름과, 그 옆 「로그아웃」
+# 「로그아웃」을 누르면 로그인 기록을 지우고 페이지를 새로 열어 「시작하기」 화면으로 돌아간다
 if has_auth():
-    st.markdown(f"**{st.user.get('name') or st.user.get('email')}** 님")
+    st.html("<style>.st-key-logout button p { font-weight: 700; }</style>")  # 「로그아웃」 글씨는 굵게
+    # 이름 길이만큼만 자리를 차지하게 해서 「로그아웃」이 이름 바로 옆에 붙는다
+    with st.container(horizontal=True, vertical_alignment="center"):
+        st.markdown(f"### {st.user.get('name') or st.user.get('email')} 님", width="content")  # 본문 글씨보다 크게 (작은 제목 크기)
+        st.button("로그아웃", key="logout", on_click=st.logout)
 
 # 기능 화면 사이드바 맨 위 — 첫 화면으로 돌아가는 버튼
 st.sidebar.button("첫 화면으로 돌아가기", key="go_landing", width="stretch", on_click=open_page, args=("landing",))
@@ -566,20 +613,14 @@ st.session_state.last = here
 # 화면 고르기 바로 밑 — 바로 전 화면으로 돌아가는 버튼 (돌아갈 화면이 없으면 눌리지 않는다)
 st.sidebar.button("이전 화면으로 돌아가기", key="go_back", width="stretch", on_click=back,
                   disabled=not (st.session_state.history or st.session_state.get("guide")
-                                or st.session_state.get("admin_view")))
+                                or st.session_state.get("admin_view")
+                                or st.session_state.get("preview") is not None))
 
 # 「관리」 — 관리자에게만 보인다. 누르면 관리 화면이 열린다
 admin = is_admin()
 if admin:
     st.sidebar.button("관리", key="go_admin", width="stretch",
                       on_click=lambda: st.session_state.update(admin_view=True))
-
-# 이름 칸 — 계약서를 저장할 때 owner 에 적고, 목록에는 이 이름으로 저장한 것만 보인다
-if "owner" in st.session_state:
-    st.session_state.owner = st.session_state.owner  # 첫 화면에 다녀와도 넣은 이름이 지워지지 않게 한다
-st.sidebar.text_input("이름", placeholder="예: 홍길동", key="owner")
-if not st.session_state.owner.strip():
-    st.sidebar.warning("이름을 넣어야 계약서를 저장하고 목록을 볼 수 있습니다.")
 
 # 어느 화면에서든 오른쪽 아래에 챗봇이 보인다
 chatbot()
@@ -588,6 +629,20 @@ chatbot()
 if admin and st.session_state.get("admin_view"):
     st.title("관리")
     st.write("관리자만 보는 화면입니다")
+
+    # 모든 사람의 계약서 — contracts 표에서 읽은 값을 고치지 않고 그대로 보여 주고, 같은 표를 CSV 로 내려받는다
+    rows, note = all_contracts()
+    if note:
+        st.error(note)
+    table = pd.DataFrame(rows)
+    st.subheader(f"모든 사람의 계약서 ({len(table)}줄)")
+    if table.empty and not note:
+        st.caption("contracts 표에 아직 줄이 없습니다.")
+    st.dataframe(table, hide_index=True)
+    # 엑셀에서 한글이 깨지지 않게 utf-8-sig 로 저장한다
+    st.download_button("CSV 내려받기", table.to_csv(index=False).encode("utf-8-sig"),
+                       file_name=f"계약서_전체_{datetime.now(KST):%Y%m%d}.csv", mime="text/csv",
+                       disabled=table.empty)
 
 elif st.session_state.screen == SCREEN_3:
     st.title("계약서 만들기")
@@ -670,14 +725,18 @@ elif st.session_state.screen == SCREEN_1:
     st.button("+ 계약서 새로 만들기", width="stretch", on_click=start_new)
 
     # 목록 항목은 3열로 나란히 놓아 아래로 길어지지 않게 한다. 항목을 선택하면 화면 2로 간다
+    # 카드에 만든 사람 — 일반 사용자는 내 것만 보이므로 내 구글 계정 이름, 관리자는 누구 것인지 owner(메일) 그대로
+    my_name = st.user.get("name") or my_email()
+
     def contract_buttons(rows, prefix):
         cols = st.columns(3)
         for i, row in enumerate(rows):
-            cols[i % 3].button(f"{row['partner']}  ·  {row['amount']}  ·  {row['date']}", width="stretch",
+            who = (row["owner"] or "(만든 사람 없음)") if admin else my_name
+            cols[i % 3].button(f"{row['partner']}  ·  {row['amount']}  ·  {row['date']}  ·  {who}", width="stretch",
                                key=f"{prefix}_{i}", on_click=pick_contract, args=(row,))
 
-    # 내가 만든 계약서 (Supabase contracts 표) — 양식별로 묶고, 그 안에서 업체명 가나다 순
-    st.subheader("내가 만든 계약서")
+    # 내가 만든 계약서 (Supabase contracts 표) — 양식별로 묶고, 그 안에서 업체명 가나다 순. 관리자는 모든 사람의 계약서
+    st.subheader("모든 계약서 (관리자)" if admin else "내가 만든 계약서")
     mine, note = my_contracts()
     if note:
         st.caption(note)

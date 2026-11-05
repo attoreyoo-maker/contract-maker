@@ -12,7 +12,7 @@ create table if not exists public.contracts (
   amount     text not null,
   date       text not null,             -- 화면에 넣은 글 그대로 (예: 2026.09.17)
   content    text not null,
-  owner      text not null default ''   -- 만든 사람 이름 (화면 1 에서 내 계약서만 골라 보일 때 쓴다)
+  owner      text not null default ''   -- 만든 사람 구글 메일 (화면 1 에서 내 계약서만 골라 보일 때 쓴다. 예전 줄은 이름 칸에 넣은 이름)
 );
 
 -- 표가 이미 있고 owner 칸만 없을 때 owner 칸을 덧붙인다
