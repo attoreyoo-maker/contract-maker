@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit.errors import StreamlitAuthError
 from keys import get_key
 import anthropic
 from PIL import Image, ImageDraw, ImageFont
@@ -442,11 +443,22 @@ def has_auth():
         return False
 
 
+def google_login():
+    """「구글로 로그인」 — 로그인 설정([auth])이 틀렸으면 가려진 원인을 화면에 보여 주려고 담아 둔다"""
+    try:
+        st.login("google")
+    except StreamlitAuthError as e:
+        st.session_state.login_error = str(e)
+
+
 # 구글 로그인 — 구글 계정으로 들어와야 화면이 보인다 (키는 .streamlit/secrets.toml 의 [auth] 에 넣는다)
 if has_auth() and not st.user.get("is_logged_in"):
     st.title("계약서 만들기")
     st.write("구글 계정으로 들어오면 계약서 만들기를 쓸 수 있습니다.")
-    st.button("구글로 로그인", on_click=st.login, args=("google",))
+    st.button("구글로 로그인", on_click=google_login)
+    if st.session_state.get("login_error"):
+        st.error("로그인 설정(secrets 의 [auth])에 문제가 있습니다. 아래 원인을 보고 고친 뒤 앱을 다시 켜세요.\n\n"
+                 + st.session_state.login_error)
     st.stop()
 
 # 첫 화면(랜딩 페이지) — streamlit run app.py 로 열면 이 화면이 먼저 뜬다
