@@ -14,3 +14,5 @@ anthropic
 altair
 # lunch.py 에서 카카오 지도 키워드 검색에 가게를 물어본다
 requests
+# app.py 에서 st.login 으로 구글 계정 로그인을 한다
+Authlib>=1.3.2

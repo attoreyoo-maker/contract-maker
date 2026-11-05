@@ -434,13 +434,41 @@ def past_chats():
                 st.markdown(row["answer"].replace("\n", "  \n"))
 
 
+def has_auth():
+    """secrets 에 로그인 열쇠([auth])가 있는지 — 없으면 로그인 없이 돈다 (배포한 앱이 멈추지 않게)"""
+    try:
+        return "auth" in st.secrets
+    except FileNotFoundError:
+        return False
+
+
+# 구글 로그인 — 구글 계정으로 들어와야 화면이 보인다 (키는 .streamlit/secrets.toml 의 [auth] 에 넣는다)
+if has_auth() and not st.user.get("is_logged_in"):
+    st.title("계약서 만들기")
+    st.write("구글 계정으로 들어오면 계약서 만들기를 쓸 수 있습니다.")
+    st.button("구글로 로그인", on_click=st.login, args=("google",))
+    st.stop()
+
 # 첫 화면(랜딩 페이지) — streamlit run app.py 로 열면 이 화면이 먼저 뜬다
 if "page" not in st.session_state:
     st.session_state.page = "landing"
 
 
+def is_admin():
+    """들어온 사람(st.user)의 메일이 secrets 의 ADMIN_EMAILS 목록에 있으면 관리자다"""
+    email = (st.user.get("email") or "").strip().lower()
+    try:
+        admins = st.secrets.get("ADMIN_EMAILS", [])
+    except FileNotFoundError:
+        admins = []  # secrets 가 없으면 아무도 관리자가 아니다
+    if isinstance(admins, str):
+        admins = admins.split(",")  # "a@x.com, b@y.com" 처럼 한 줄로 적어도 읽는다
+    return bool(email) and email in {a.strip().lower() for a in admins}
+
+
 def open_page(page):
     st.session_state.page = page
+    st.session_state.admin_view = False  # 첫 화면을 오가면 관리 화면은 닫힌다
     if page == "app":
         go(SCREEN_1)  # 「시작하기」를 누르면 늘 화면 1(계약서 목록)부터 보인다
         st.session_state.history = []
@@ -451,7 +479,9 @@ def open_page(page):
 
 def back():
     """"이전 화면으로 돌아가기" — 누를 때마다 지나온 화면을 하나씩 거꾸로 되돌아간다"""
-    if st.session_state.get("guide"):
+    if st.session_state.get("admin_view"):
+        st.session_state.admin_view = False  # 관리 화면을 보고 있으면 먼저 그것을 닫는다
+    elif st.session_state.get("guide"):
         st.session_state.guide = False  # 계약서 작성방법을 보고 있으면 먼저 그것을 닫고 계약서 목록으로 돌아간다
     elif st.session_state.history:
         st.session_state.screen, st.session_state.step = st.session_state.history.pop()
@@ -490,6 +520,10 @@ if st.session_state.page == "landing":
     mid.button("시작하기", key="start", width="stretch", on_click=open_page, args=("app",))
     st.stop()
 
+# 기능 화면 맨 위 — 구글 계정으로 들어온 사람의 이름
+if has_auth():
+    st.markdown(f"**{st.user.get('name') or st.user.get('email')}** 님")
+
 # 기능 화면 사이드바 맨 위 — 첫 화면으로 돌아가는 버튼
 st.sidebar.button("첫 화면으로 돌아가기", key="go_landing", width="stretch", on_click=open_page, args=("landing",))
 
@@ -511,6 +545,7 @@ here = (st.session_state.screen, st.session_state.step)
 if st.session_state.get("last", here) != here:
     st.session_state.history.append(st.session_state.last)
     st.session_state.guide = False  # 다른 화면에 다녀오면 계약서 작성방법은 닫힌 채 목록부터 보인다
+    st.session_state.admin_view = False  # 관리 화면도 닫힌다
     st.session_state.preview = None  # 예시 계약서 미리보기도 접힌 채로 보인다 — 「미리보기」를 눌러야 다시 펼쳐진다
     if st.session_state.screen == SCREEN_1:
         clear_writing()  # 화면 1 에 오면 화면 2·3 에 쓰던 계약서를 비운다 (화면 2↔3 을 오갈 때는 남겨 둔다)
@@ -518,7 +553,14 @@ st.session_state.last = here
 
 # 화면 고르기 바로 밑 — 바로 전 화면으로 돌아가는 버튼 (돌아갈 화면이 없으면 눌리지 않는다)
 st.sidebar.button("이전 화면으로 돌아가기", key="go_back", width="stretch", on_click=back,
-                  disabled=not (st.session_state.history or st.session_state.get("guide")))
+                  disabled=not (st.session_state.history or st.session_state.get("guide")
+                                or st.session_state.get("admin_view")))
+
+# 「관리」 — 관리자에게만 보인다. 누르면 관리 화면이 열린다
+admin = is_admin()
+if admin:
+    st.sidebar.button("관리", key="go_admin", width="stretch",
+                      on_click=lambda: st.session_state.update(admin_view=True))
 
 # 이름 칸 — 계약서를 저장할 때 owner 에 적고, 목록에는 이 이름으로 저장한 것만 보인다
 if "owner" in st.session_state:
@@ -530,7 +572,12 @@ if not st.session_state.owner.strip():
 # 어느 화면에서든 오른쪽 아래에 챗봇이 보인다
 chatbot()
 
-if st.session_state.screen == SCREEN_3:
+# 관리 화면 — 관리자가 아니면 admin_view 가 켜져 있어도 이 코드는 돌지 않는다
+if admin and st.session_state.get("admin_view"):
+    st.title("관리")
+    st.write("관리자만 보는 화면입니다")
+
+elif st.session_state.screen == SCREEN_3:
     st.title("계약서 만들기")
     st.caption("by attoreyoo")
 
